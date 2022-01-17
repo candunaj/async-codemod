@@ -176,7 +176,7 @@ function getBody(j, func) {
 }
 
 let thenIndex = 0;
-function refactorThen(j, func, onlyReturn) {
+function refactorThen(j, func, onlyReturn, rejectFunctionName) {
   let done = false;
   j(func)
     .find(j.Identifier)
@@ -290,7 +290,13 @@ function refactorThen(j, func, onlyReturn) {
                 ];
               }
               tmpNodes.forEach((n) => nodes.push(n));
-              if (expressions[i].node.arguments.length === 2) {
+              if (
+                expressions[i].node.arguments.length === 2 &&
+                !(
+                  !isArrowExpression2 &&
+                  expressions[i].node.arguments[1].name === rejectFunctionName
+                )
+              ) {
                 let tryNode = j.tryStatement(
                   j.blockStatement(nodes),
                   j.catchClause(
@@ -318,33 +324,40 @@ function refactorThen(j, func, onlyReturn) {
                 nodes = [tryNode];
               }
             } else if (expressions[i].node.callee.property.name === "catch") {
-              let tryNode = j.tryStatement(
-                j.blockStatement(nodes),
-                j.catchClause(
-                  j.identifier(
-                    expressions[i].node.arguments[0]?.params?.[0]?.name ??
-                      `err_tmp`
-                  ),
-                  null,
-                  j.blockStatement(
-                    isArrowExpression
-                      ? getBody(j, expressions[i].node.arguments[0])
-                      : [
-                          j.returnStatement(
-                            j.awaitExpression(
-                              j.callExpression(
-                                j.identifier(
-                                  expressions[i].node.arguments[0].name
-                                ),
-                                [j.identifier(`err_tmp`)]
-                              )
-                            )
-                          ),
-                        ]
-                  )
+              if (
+                !(
+                  !isArrowExpression &&
+                  expressions[i].node.arguments[0].name === rejectFunctionName
                 )
-              );
-              nodes = [tryNode];
+              ) {
+                let tryNode = j.tryStatement(
+                  j.blockStatement(nodes),
+                  j.catchClause(
+                    j.identifier(
+                      expressions[i].node.arguments[0]?.params?.[0]?.name ??
+                        `err_tmp`
+                    ),
+                    null,
+                    j.blockStatement(
+                      isArrowExpression
+                        ? getBody(j, expressions[i].node.arguments[0])
+                        : [
+                            j.returnStatement(
+                              j.awaitExpression(
+                                j.callExpression(
+                                  j.identifier(
+                                    expressions[i].node.arguments[0].name
+                                  ),
+                                  [j.identifier(`err_tmp`)]
+                                )
+                              )
+                            ),
+                          ]
+                    )
+                  )
+                );
+                nodes = [tryNode];
+              }
             } else if (expressions[i].node.callee.property.name === "finally") {
               let tryNode = j.tryStatement(
                 j.blockStatement(nodes),
@@ -366,7 +379,7 @@ function refactorThen(j, func, onlyReturn) {
             }
           }
           replace(j, returnStatement, nodes);
-          refactorThen(j, func, false);
+          refactorThen(j, func, false, rejectFunctionName);
           done = true;
         }
       }
@@ -378,7 +391,7 @@ function refactorNewPromise(j, func, returnStatement) {
   let arrowFunc = returnStatement.node.argument.arguments[0];
   let resolveFunction = arrowFunc.params[0]?.name;
   let rejectFunction = arrowFunc.params[1]?.name;
-  refactorThen(j, arrowFunc, false);
+  refactorThen(j, arrowFunc, false, rejectFunction);
   replaceResolveReject(j, arrowFunc, resolveFunction, rejectFunction);
   let newNodes = getBody(j, arrowFunc);
   replace(j, returnStatement, newNodes);
